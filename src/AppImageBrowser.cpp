@@ -9,7 +9,7 @@
 namespace fs = std::filesystem;
 
 AppImageBrowser::AppImageBrowser() 
-    : window(nullptr), scrolled_window(nullptr), list_box(nullptr),
+    : window(nullptr), scrolled_window(nullptr), flow_box(nullptr),
       path_entry(nullptr), refresh_button(nullptr) {
     current_directory = get_current_directory();
 }
@@ -75,10 +75,15 @@ void AppImageBrowser::create_ui() {
                                    GTK_POLICY_AUTOMATIC);
     gtk_box_pack_start(GTK_BOX(vbox), scrolled_window, TRUE, TRUE, 0);
     
-    // Create list box
-    list_box = gtk_list_box_new();
-    gtk_container_add(GTK_CONTAINER(scrolled_window), list_box);
-    g_signal_connect(list_box, "row-activated", G_CALLBACK(on_appimage_clicked), this);
+    // Create flow box for grid layout
+    flow_box = gtk_flow_box_new();
+    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(flow_box), 2);
+    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(flow_box), 2);
+    gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(flow_box), GTK_SELECTION_NONE);
+    gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(flow_box), TRUE);
+    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(flow_box), 10);
+    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(flow_box), 10);
+    gtk_container_add(GTK_CONTAINER(scrolled_window), flow_box);
     
     // Status bar
     GtkWidget* statusbar = gtk_label_new("Click on an AppImage to launch it");
@@ -118,45 +123,63 @@ void AppImageBrowser::scan_directory(const std::string& path) {
 
 void AppImageBrowser::populate_list() {
     // Clear existing items
-    GList* children = gtk_container_get_children(GTK_CONTAINER(list_box));
+    GList* children = gtk_container_get_children(GTK_CONTAINER(flow_box));
     for (GList* iter = children; iter != nullptr; iter = g_list_next(iter)) {
         gtk_widget_destroy(GTK_WIDGET(iter->data));
     }
     g_list_free(children);
     
-    // Add AppImage files to list
+    // Add AppImage files to grid
     if (appimage_files.empty()) {
-        GtkWidget* row = gtk_list_box_row_new();
         GtkWidget* label = gtk_label_new("No AppImage files found in this directory");
-        gtk_container_add(GTK_CONTAINER(row), label);
-        gtk_container_add(GTK_CONTAINER(list_box), row);
+        gtk_container_add(GTK_CONTAINER(flow_box), label);
     } else {
         for (const auto& file : appimage_files) {
-            GtkWidget* row = gtk_list_box_row_new();
+            // Create button for each AppImage
+            GtkWidget* button = gtk_button_new();
+            gtk_widget_set_size_request(button, 200, 200);
             
-            // Create horizontal box for icon and label
-            GtkWidget* hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-            gtk_container_add(GTK_CONTAINER(row), hbox);
+            // Create vertical box inside button
+            GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+            gtk_container_add(GTK_CONTAINER(button), vbox);
             
-            // Add icon (generic executable icon)
-            GtkWidget* icon = gtk_image_new_from_icon_name("application-x-executable", GTK_ICON_SIZE_LARGE_TOOLBAR);
-            gtk_box_pack_start(GTK_BOX(hbox), icon, FALSE, FALSE, 5);
+            // Add spacer at top
+            GtkWidget* top_spacer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+            gtk_box_pack_start(GTK_BOX(vbox), top_spacer, TRUE, TRUE, 0);
+            
+            // Add icon (large application icon)
+            GtkWidget* icon = gtk_image_new_from_icon_name("application-x-executable", GTK_ICON_SIZE_DIALOG);
+            gtk_image_set_pixel_size(GTK_IMAGE(icon), 96);
+            gtk_box_pack_start(GTK_BOX(vbox), icon, FALSE, FALSE, 5);
             
             // Extract filename from path
             fs::path p(file);
-            GtkWidget* label = gtk_label_new(p.filename().c_str());
-            gtk_label_set_xalign(GTK_LABEL(label), 0.0);
-            gtk_box_pack_start(GTK_BOX(hbox), label, TRUE, TRUE, 0);
+            std::string filename = p.filename().string();
+            
+            // Create label with word wrapping
+            GtkWidget* label = gtk_label_new(filename.c_str());
+            gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
+            gtk_label_set_line_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
+            gtk_label_set_max_width_chars(GTK_LABEL(label), 20);
+            gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
+            gtk_box_pack_start(GTK_BOX(vbox), label, FALSE, FALSE, 5);
+            
+            // Add spacer at bottom
+            GtkWidget* bottom_spacer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+            gtk_box_pack_start(GTK_BOX(vbox), bottom_spacer, TRUE, TRUE, 0);
             
             // Store full path as data
-            g_object_set_data_full(G_OBJECT(row), "appimage_path", 
+            g_object_set_data_full(G_OBJECT(button), "appimage_path", 
                                    g_strdup(file.c_str()), g_free);
             
-            gtk_container_add(GTK_CONTAINER(list_box), row);
+            // Connect click signal
+            g_signal_connect(button, "clicked", G_CALLBACK(on_appimage_clicked), this);
+            
+            gtk_container_add(GTK_CONTAINER(flow_box), button);
         }
     }
     
-    gtk_widget_show_all(list_box);
+    gtk_widget_show_all(flow_box);
 }
 
 void AppImageBrowser::launch_appimage(const std::string& path) {
@@ -185,10 +208,10 @@ void AppImageBrowser::launch_appimage(const std::string& path) {
 }
 
 // GTK Callbacks
-void AppImageBrowser::on_appimage_clicked(GtkListBox* list_box, GtkListBoxRow* row, gpointer user_data) {
+void AppImageBrowser::on_appimage_clicked(GtkButton* button, gpointer user_data) {
     AppImageBrowser* browser = static_cast<AppImageBrowser*>(user_data);
     
-    const char* path = static_cast<const char*>(g_object_get_data(G_OBJECT(row), "appimage_path"));
+    const char* path = static_cast<const char*>(g_object_get_data(G_OBJECT(button), "appimage_path"));
     if (path != nullptr) {
         browser->launch_appimage(path);
     }

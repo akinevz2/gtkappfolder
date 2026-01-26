@@ -15,7 +15,7 @@ public:
 private:
     GtkWidget* window;
     GtkWidget* scrolled_window;
-    GtkWidget* list_box;
+    GtkWidget* flow_box;
     GtkWidget* path_entry;
     GtkWidget* refresh_button;
     
@@ -23,7 +23,7 @@ private:
     std::vector<std::string> appimage_files;
     
     // GTK callbacks
-    static void on_appimage_clicked(GtkListBox* list_box, GtkListBoxRow* row, gpointer user_data);
+    static void on_appimage_clicked(GtkButton* button, gpointer user_data);
     static void on_refresh_clicked(GtkButton* button, gpointer user_data);
     static void on_path_changed(GtkEntry* entry, gpointer user_data);
     static void on_destroy(GtkWidget* widget, gpointer user_data);
