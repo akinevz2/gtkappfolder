@@ -27,3 +27,5 @@ Makefile
 
 # Compile commands
 compile_commands.json
+# AppImage extraction artifacts (runtime temp directories)
+squashfs-root/
