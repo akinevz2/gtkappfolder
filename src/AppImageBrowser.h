@@ -36,8 +36,8 @@ private:
     GtkWidget* open_button;
     GtkWidget* install_button;
     GtkWidget* status_label;
-    GtkWidget* group_switch;
-    bool group_by_folder{true};
+    GtkWidget* autoclose_switch;
+    bool autoclose_enabled{false};
     GSettings* settings{nullptr};
     std::unordered_map<std::string, CachedInfo> cache_;
     std::mutex cache_mutex_;
@@ -61,7 +61,7 @@ private:
     static void on_menu_properties_button_clicked(GtkButton* button, gpointer user_data);
     static void on_dir_changed(GFileMonitor* monitor, GFile* file, GFile* other_file, GFileMonitorEvent event_type, gpointer user_data);
     static gboolean on_drop(GtkDropTarget* target, const GValue* value, double x, double y, gpointer user_data);
-    static gboolean on_group_switch(GtkSwitch* widget, gboolean state, gpointer user_data);
+    static gboolean on_autoclose_switch(GtkSwitch* widget, gboolean state, gpointer user_data);
     static gpointer metadata_thread_func(gpointer data);
     
     // Helper methods

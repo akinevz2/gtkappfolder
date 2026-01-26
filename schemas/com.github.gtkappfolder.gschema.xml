@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
   <schema id="com.github.gtkappfolder" path="/com/github/gtkappfolder/">
-    <key name="group-by-folder" type="b">
-      <default>true</default>
-      <summary>Group items by immediate subfolder</summary>
-      <description>When true, AppImages are displayed grouped by their containing folder (one level deep). When false, show a flat list.</description>
+    <key name="autoclose-enabled" type="b">
+      <default>false</default>
+      <summary>Automatically close the app after launching AppImage</summary>
+      <description>When true, the application window closes 250ms after successfully launching an AppImage.</description>
     </key>
     <key name="last-folder" type="s">
       <default>''</default>

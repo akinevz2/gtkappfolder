@@ -72,14 +72,14 @@ void AppImageBrowser::create_ui(GtkApplication* app) {
     GtkWidget* header_bar = adw_header_bar_new();
     gtk_box_prepend(GTK_BOX(vbox), header_bar);
     
-    // Group by folder switch on the header bar
+    // Autoclose switch on the header bar
     GtkWidget* switch_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    GtkWidget* switch_label = gtk_label_new("Grouped");
-    group_switch = gtk_switch_new();
-    gtk_switch_set_active(GTK_SWITCH(group_switch), group_by_folder);
-    g_signal_connect(group_switch, "state-set", G_CALLBACK(on_group_switch), this);
+    GtkWidget* switch_label = gtk_label_new("Autoclose");
+    autoclose_switch = gtk_switch_new();
+    gtk_switch_set_active(GTK_SWITCH(autoclose_switch), autoclose_enabled);
+    g_signal_connect(autoclose_switch, "state-set", G_CALLBACK(on_autoclose_switch), this);
     gtk_box_append(GTK_BOX(switch_box), switch_label);
-    gtk_box_append(GTK_BOX(switch_box), group_switch);
+    gtk_box_append(GTK_BOX(switch_box), autoclose_switch);
     adw_header_bar_pack_start(ADW_HEADER_BAR(header_bar), switch_box);
     
     // Controls row: path entry + buttons
@@ -248,7 +248,7 @@ void AppImageBrowser::populate_list() {
     if (appimage_files.empty()) {
         gtk_stack_set_visible_child_name(GTK_STACK(content_stack), "empty");
         set_status("No AppImage files found");
-    } else if (group_by_folder) {
+    } else {
         gtk_stack_set_visible_child_name(GTK_STACK(content_stack), "grid");
         set_status(std::to_string(appimage_files.size()) + " AppImage(s) found");
         // Clear the flat grid too (so it doesn't accumulate)
@@ -299,32 +299,6 @@ void AppImageBrowser::populate_list() {
                 load_metadata_async(file, tile);
             }
         }
-    } else {
-        gtk_stack_set_visible_child_name(GTK_STACK(content_stack), "flat");
-        set_status(std::to_string(appimage_files.size()) + " AppImage(s) found");
-        // Clear groups section
-        {
-            GtkWidget* child = gtk_widget_get_first_child(groups_box);
-            while (child) {
-                GtkWidget* next = gtk_widget_get_next_sibling(child);
-                gtk_widget_unparent(child);
-                child = next;
-            }
-        }
-        // Rebuild flat grid
-        {
-            GtkWidget* child = gtk_widget_get_first_child(flow_box);
-            while (child) {
-                GtkWidget* next = gtk_widget_get_next_sibling(child);
-                gtk_widget_unparent(child);
-                child = next;
-            }
-        }
-        for (const auto& file : appimage_files) {
-            GtkWidget* tile = build_appimage_tile(file);
-            gtk_flow_box_append(GTK_FLOW_BOX(flow_box), tile);
-            load_metadata_async(file, tile);
-        }
     }
 
     gtk_widget_set_visible(content_stack, TRUE);
@@ -342,17 +316,18 @@ void AppImageBrowser::launch_appimage(const std::string& path) {
         }
     }
 
-    // Prefer GSubprocess for robust spawning and env control
+    // Prefer GSubprocess for robust spawning
     GError* error = nullptr;
     GSubprocessLauncher* launcher = g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_NONE);
 
-    // If FUSE2 is not present, fall back to extract-and-run
+    // Check if FUSE2 is available - required for sandboxing
     if (!has_fuse2()) {
-        g_subprocess_launcher_setenv(launcher, "APPIMAGE_EXTRACT_AND_RUN", "1", TRUE);
-        set_status("FUSE not found; extracting and running (slower)…");
-    } else {
-        set_status("Launching AppImage…");
+        set_status("FUSE2 is required to run AppImages. Click 'Install Requirements' to install it.");
+        return;
     }
+
+    // Launch AppImage with FUSE2 sandboxing
+    set_status("Launching AppImage…");
 
     // Build argv
     const char* argvv[] = { path.c_str(), nullptr };
@@ -369,6 +344,15 @@ void AppImageBrowser::launch_appimage(const std::string& path) {
 
     // Do not wait; just unref to let it run
     g_object_unref(proc);
+    
+    // If autoclose is enabled, schedule window close after 250ms
+    if (autoclose_enabled) {
+        g_timeout_add(250, [](gpointer user_data) -> gboolean {
+            AppImageBrowser* self = static_cast<AppImageBrowser*>(user_data);
+            gtk_window_close(GTK_WINDOW(self->window));
+            return G_SOURCE_REMOVE;
+        }, this);
+    }
 }
 
 // GTK Callbacks
@@ -499,21 +483,33 @@ bool AppImageBrowser::has_fuse2() {
 }
 
 void AppImageBrowser::install_requirements() {
-    set_status("Checking and installing FUSE (admin required)…");
+    // Check if FUSE2 is already installed
+    if (has_fuse2()) {
+        AdwAlertDialog* dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(
+            "FUSE2 Already Installed",
+            "FUSE2 is already available on your system. AppImages will run with proper mounting and sandboxing."));
+        adw_alert_dialog_add_response(dialog, "ok", "OK");
+        adw_alert_dialog_set_default_response(dialog, "ok");
+        adw_alert_dialog_set_close_response(dialog, "ok");
+        adw_dialog_present(ADW_DIALOG(dialog), GTK_WIDGET(window));
+        return;
+    }
 
-    // Determine package manager
+    set_status("Checking and installing FUSE2 (admin required)…");
+
+    // Determine package manager and build appropriate install command
     const char* pkg = nullptr;
-    const char* install_cmd = nullptr; // filled via shell string
+    const char* install_cmd = nullptr;
 
     if (g_find_program_in_path("apt-get")) {
         pkg = "apt";
-        install_cmd = "apt-get update && apt-get install -y libfuse2";
+        install_cmd = "add-apt-repository universe && apt-get update && apt-get install -y libfuse2";
     } else if (g_find_program_in_path("dnf")) {
         pkg = "dnf";
-        install_cmd = "dnf install -y fuse";
+        install_cmd = "dnf install -y fuse fuse-libs";
     } else if (g_find_program_in_path("yum")) {
         pkg = "yum";
-        install_cmd = "yum install -y fuse";
+        install_cmd = "dnf install -y fuse fuse-libs";
     } else if (g_find_program_in_path("pacman")) {
         pkg = "pacman";
         install_cmd = "pacman -Sy --noconfirm fuse2";
@@ -1109,11 +1105,10 @@ gboolean AppImageBrowser::on_drop(GtkDropTarget* target, const GValue* value, do
     return any;  // Return TRUE if we handled the drop
 }
 
-gboolean AppImageBrowser::on_group_switch(GtkSwitch* /*widget*/, gboolean state, gpointer user_data) {
+gboolean AppImageBrowser::on_autoclose_switch(GtkSwitch* /*widget*/, gboolean state, gpointer user_data) {
     AppImageBrowser* self = static_cast<AppImageBrowser*>(user_data);
-    self->group_by_folder = state;
-    if (self->settings) g_settings_set_boolean(self->settings, "group-by-folder", state);
-    self->populate_list();
+    self->autoclose_enabled = state;
+    if (self->settings) g_settings_set_boolean(self->settings, "autoclose-enabled", state);
     return FALSE; // allow state change to proceed
 }
 
@@ -1155,7 +1150,7 @@ void AppImageBrowser::init_settings() {
     const char* home = g_get_home_dir();
     std::string home_dir = home ? std::string(home) : get_current_directory();
     if (settings) {
-        group_by_folder = g_settings_get_boolean(settings, "group-by-folder");
+        autoclose_enabled = g_settings_get_boolean(settings, "autoclose-enabled");
         gchar* last = g_settings_get_string(settings, "last-folder");
         if (last && *last) {
             if (g_file_test(last, G_FILE_TEST_IS_DIR)) {
