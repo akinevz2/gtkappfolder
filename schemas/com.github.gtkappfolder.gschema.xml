@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="com.github.gtkappfolder" path="/com/github/gtkappfolder/">
+    <key name="group-by-folder" type="b">
+      <default>true</default>
+      <summary>Group items by immediate subfolder</summary>
+      <description>When true, AppImages are displayed grouped by their containing folder (one level deep). When false, show a flat list.</description>
+    </key>
+    <key name="last-folder" type="s">
+      <default>''</default>
+      <summary>Last viewed folder</summary>
+      <description>Absolute path to the last folder browsed by the application.</description>
+    </key>
+  </schema>
+</schemalist>
