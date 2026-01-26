@@ -33,22 +33,29 @@ std::string AppImageBrowser::get_current_directory() {
 }
 
 void AppImageBrowser::run(int argc, char* argv[]) {
-    GtkApplication* app = gtk_application_new("com.github.gtkappfolder", G_APPLICATION_DEFAULT_FLAGS);
+    // Make the app non-unique so a stale or running instance on the session bus
+    // doesn't cause this invocation to exit immediately.
+    GtkApplication* app = gtk_application_new(
+        "com.github.gtkappfolder",
+        static_cast<GApplicationFlags>(G_APPLICATION_DEFAULT_FLAGS | G_APPLICATION_NON_UNIQUE));
     g_signal_connect(app, "activate", G_CALLBACK(+[](GtkApplication* app, gpointer user_data) {
         AppImageBrowser* browser = static_cast<AppImageBrowser*>(user_data);
-        browser->create_ui();
+        browser->create_ui(app);
         browser->scan_directory(browser->current_directory);
         browser->populate_list();
         browser->start_dir_monitor(browser->current_directory);
+        // Add window to application to keep it alive (critical for NON_UNIQUE flag)
+        gtk_application_add_window(app, GTK_WINDOW(browser->window));
         gtk_window_present(GTK_WINDOW(browser->window));
     }), this);
-    g_application_run(G_APPLICATION(app), argc, argv);
+    int status = g_application_run(G_APPLICATION(app), argc, argv);
     g_object_unref(app);
+    std::exit(status);
 }
 
-void AppImageBrowser::create_ui() {
-    // Create main window with AdwApplicationWindow
-    window = adw_application_window_new(NULL);
+void AppImageBrowser::create_ui(GtkApplication* app) {
+    // Create main window with AdwApplicationWindow bound to the application
+    window = adw_application_window_new(app);
     gtk_window_set_title(GTK_WINDOW(window), "AppImage Browser");
     gtk_window_set_default_size(GTK_WINDOW(window), 700, 500);
     g_signal_connect(window, "close-request", G_CALLBACK(on_destroy), this);
@@ -274,6 +281,7 @@ void AppImageBrowser::populate_list() {
             }
             std::string markup = std::string("<b>") + group_name + "</b> (" + std::to_string(files.size()) + ")\n<small>" + full_path + "</small>";
             gtk_label_set_use_markup(GTK_LABEL(header), TRUE);
+            gtk_label_set_markup(GTK_LABEL(header), markup.c_str());
             gtk_label_set_xalign(GTK_LABEL(header), 0.0);
             gtk_box_append(GTK_BOX(groups_box), header);
             // Group grid
@@ -395,13 +403,17 @@ void AppImageBrowser::on_path_changed(GtkEntry* entry, gpointer user_data) {
     browser->start_dir_monitor(browser->current_directory);
 }
 
-void AppImageBrowser::on_destroy(GtkWidget* widget, gpointer user_data) {
+gboolean AppImageBrowser::on_destroy(GtkWidget* widget, gpointer user_data) {
     AppImageBrowser* browser = static_cast<AppImageBrowser*>(user_data);
     if (browser) {
         browser->stop_dir_monitor();
-        if (browser->settings) g_object_unref(browser->settings);
+        if (browser->settings) {
+            g_object_unref(browser->settings);
+            browser->settings = nullptr;
+        }
     }
-    gtk_window_destroy(GTK_WINDOW(widget));
+    // Returning FALSE allows GTK to destroy the window normally.
+    return FALSE;
 }
 
 void AppImageBrowser::on_open_folder(GtkButton* /*button*/, gpointer user_data) {
@@ -874,16 +886,23 @@ gpointer AppImageBrowser::metadata_thread_func(gpointer data) {
     }
 
     // Save to in-memory cache
-    self->cache_[path] = info;
+    {
+        std::lock_guard<std::mutex> lock(self->cache_mutex_);
+        self->cache_[path] = info;
+    }
 
     // Push UI update onto main thread
     struct UiUpdate { AppImageBrowser* self; GtkWidget* button; std::string path; };
     UiUpdate* u = new UiUpdate{ self, task->button, path };
     g_idle_add_full(G_PRIORITY_DEFAULT, [](gpointer ud)->gboolean {
         std::unique_ptr<UiUpdate> uu(static_cast<UiUpdate*>(ud));
-        auto it = uu->self->cache_.find(uu->path);
-        if (it == uu->self->cache_.end()) return FALSE;
-        const auto& info = it->second;
+        AppImageBrowser::CachedInfo info;
+        {
+            std::lock_guard<std::mutex> lock(uu->self->cache_mutex_);
+            auto it = uu->self->cache_.find(uu->path);
+            if (it == uu->self->cache_.end()) return FALSE;
+            info = it->second;
+        }
         GtkWidget* img = static_cast<GtkWidget*>(g_object_get_data(G_OBJECT(uu->button), "img_widget"));
         GtkWidget* lbl = static_cast<GtkWidget*>(g_object_get_data(G_OBJECT(uu->button), "label_widget"));
         if (img && !info.icon_path.empty()) {
@@ -904,16 +923,17 @@ void AppImageBrowser::load_metadata_async(const std::string& path, GtkWidget* bu
     // Check if we already have fresh cache
     struct stat st{};
     if (stat(path.c_str(), &st) == 0) {
+        std::unique_lock<std::mutex> lock(cache_mutex_);
         auto it = cache_.find(path);
         if (it != cache_.end() && it->second.mtime == st.st_mtime) {
             // Cache is fresh; update UI immediately
-            struct UiUpdate { AppImageBrowser* self; GtkWidget* button; std::string path; };
-            UiUpdate* u = new UiUpdate{ this, button, path };
+            AppImageBrowser::CachedInfo info = it->second;
+            lock.unlock();
+            struct UiUpdate { AppImageBrowser* self; GtkWidget* button; AppImageBrowser::CachedInfo info; };
+            UiUpdate* u = new UiUpdate{ this, button, info };
             g_idle_add_full(G_PRIORITY_DEFAULT, [](gpointer ud)->gboolean {
                 std::unique_ptr<UiUpdate> uu(static_cast<UiUpdate*>(ud));
-                auto it2 = uu->self->cache_.find(uu->path);
-                if (it2 == uu->self->cache_.end()) return FALSE;
-                const auto& info2 = it2->second;
+                const auto& info2 = uu->info;
                 GtkWidget* img = static_cast<GtkWidget*>(g_object_get_data(G_OBJECT(uu->button), "img_widget"));
                 GtkWidget* lbl = static_cast<GtkWidget*>(g_object_get_data(G_OBJECT(uu->button), "label_widget"));
                 if (img && !info2.icon_path.empty()) {
