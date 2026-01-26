@@ -9,6 +9,7 @@
 #include <map>
 #include <unordered_map>
 #include <ctime>
+#include <mutex>
 
 class AppImageBrowser {
 public:
@@ -39,6 +40,7 @@ private:
     bool group_by_folder{true};
     GSettings* settings{nullptr};
     std::unordered_map<std::string, CachedInfo> cache_;
+    std::mutex cache_mutex_;
     GFileMonitor* dir_monitor{nullptr};
     std::vector<GFileMonitor*> sub_monitors;
     
@@ -50,7 +52,7 @@ private:
     static void on_appimage_clicked(GtkButton* button, gpointer user_data);
     static void on_refresh_clicked(GtkButton* button, gpointer user_data);
     static void on_path_changed(GtkEntry* entry, gpointer user_data);
-    static void on_destroy(GtkWidget* widget, gpointer user_data);
+    static gboolean on_destroy(GtkWidget* widget, gpointer user_data);
     static void on_open_folder(GtkButton* button, gpointer user_data);
     static void on_install_requirements(GtkButton* button, gpointer user_data);
     static void on_item_clicked(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data);
@@ -63,7 +65,7 @@ private:
     static gpointer metadata_thread_func(gpointer data);
     
     // Helper methods
-    void create_ui();
+    void create_ui(GtkApplication* app);
     void scan_directory(const std::string& path);
     void populate_list();
     void launch_appimage(const std::string& path);
