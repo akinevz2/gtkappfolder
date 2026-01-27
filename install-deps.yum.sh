@@ -15,7 +15,10 @@ sudo $PKG_MGR install -y \
     make \
     cmake \
     pkgconfig \
-    gtk3-devel
+    gtk3-devel \
+    gtk4-devel \
+    libadwaita-devel \
+    openssl-devel
 
 if [ $? -eq 0 ]; then
     echo "✓ All dependencies installed successfully!"

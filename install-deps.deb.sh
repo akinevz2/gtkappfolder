@@ -10,7 +10,10 @@ sudo apt-get install -y \
     build-essential \
     cmake \
     pkg-config \
-    libgtk-3-dev
+    libgtk-3-dev \
+    libgtk-4-dev \
+    libadwaita-1-dev \
+    libssl-dev
 
 if [ $? -eq 0 ]; then
     echo "✓ All dependencies installed successfully!"

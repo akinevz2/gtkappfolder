@@ -1,9 +1,7 @@
 #include "AppImageBrowser.h"
-#include <adwaita.h>
 #include <iostream>
 
 int main(int argc, char* argv[]) {
-    adw_init();
     try {
         AppImageBrowser browser;
         browser.run(argc, argv);

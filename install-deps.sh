@@ -19,5 +19,8 @@ else
     echo "  - cmake"
     echo "  - pkg-config"
     echo "  - GTK3 development libraries (gtk3-devel or libgtk-3-dev)"
+    echo "  - GTK4 development libraries (gtk4-devel or libgtk-4-dev)"
+    echo "  - libadwaita development libraries (libadwaita-devel or libadwaita-1-dev)"
+    echo "  - OpenSSL development libraries (openssl-devel or libssl-dev)"
     exit 1
 fi
