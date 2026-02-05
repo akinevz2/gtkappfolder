@@ -8,8 +8,8 @@ GTK4 with libadwaita is the default and recommended version:
 
 ```bash
 mkdir build && cd build
-cmake .. -DUSE_GTK4=ON
-cmake --build . -j4
+cmake -G Ninja .. -DUSE_GTK4=ON
+ninja
 ./bin/GtkAppFolder
 ```
 
@@ -19,8 +19,8 @@ To build the GTK3 version:
 
 ```bash
 mkdir build-gtk3 && cd build-gtk3
-cmake .. -DUSE_GTK4=OFF
-cmake --build . -j4
+cmake -G Ninja .. -DUSE_GTK4=OFF
+ninja
 ./bin/GtkAppFolder
 ```
 
@@ -77,9 +77,9 @@ The core and system modules are shared between GTK3 and GTK4 builds, with only t
 
 ## Quick Reference
 
-| Command                   | Description                  |
-| ------------------------- | ---------------------------- |
-| `cmake .. -DUSE_GTK4=ON`  | Build with GTK4 (default)    |
-| `cmake .. -DUSE_GTK4=OFF` | Build with GTK3              |
-| `cmake --build . -j4`     | Compile with 4 parallel jobs |
-| `./bin/GtkAppFolder`      | Run the application          |
+| Command                             | Description                  |
+| ----------------------------------- | ---------------------------- |
+| `cmake -G Ninja .. -DUSE_GTK4=ON`   | Configure with GTK4 (default)|
+| `cmake -G Ninja .. -DUSE_GTK4=OFF`  | Configure with GTK3          |
+| `ninja`                             | Build the project            |
+| `./bin/GtkAppFolder`                | Run the application          |

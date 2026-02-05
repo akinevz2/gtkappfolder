@@ -9,6 +9,7 @@ sudo apt-get update
 sudo apt-get install -y \
     build-essential \
     cmake \
+    ninja-build \
     pkg-config \
     libgtk-3-dev \
     libgtk-4-dev \

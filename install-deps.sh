@@ -16,6 +16,7 @@ else
     echo "Error: No supported package manager found (apt-get, yum, or dnf)"
     echo "Please install the following packages manually:"
     echo "  - build-essential / gcc-c++ and make"
+    echo "  - ninja-build (or ninja)"
     echo "  - cmake"
     echo "  - pkg-config"
     echo "  - GTK3 development libraries (gtk3-devel or libgtk-3-dev)"

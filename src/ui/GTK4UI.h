@@ -2,6 +2,7 @@
 
 #include "UIInterface.h"
 #include <adwaita.h>
+#include <vector>
 
 namespace UI {
 
@@ -40,6 +41,7 @@ public:
     GtkWidget* get_window() override { return GTK_WIDGET(window); }
     
 private:
+    GtkApplication* app;
     AdwApplicationWindow* window;
     GtkWidget* main_box;
     GtkWidget* path_entry;
@@ -51,13 +53,37 @@ private:
     GtkEntryCompletion* path_completion;
     GtkListStore* completion_model;
     
+    // Store window parameters for creation after app activation
+    std::string window_title;
+    int window_width;
+    int window_height;
+    std::string initial_path;
+    std::string initial_status_text;
+    bool window_created;
+    bool path_completion_setup_deferred;
+    
+    // Deferred content structure
+    struct DeferredTile {
+        std::string path;
+        std::string filename;
+        std::string icon_path;
+    };
+    std::vector<DeferredTile> deferred_tiles;
+    bool has_deferred_empty_message;
+    std::string deferred_empty_message;
+    
     PathChangedCallback on_path_changed;
     RefreshCallback on_refresh;
     AppImageClickCallback on_appimage_click;
     
     // GTK4 static callbacks
     static gboolean on_close_request_cb(GtkWidget* widget, gpointer user_data);
+    static void on_app_activate_cb(GtkApplication* app, gpointer user_data);
     static void on_path_activate_cb(GtkEntry* entry, gpointer user_data);
+    
+    // Helper method for deferred window creation
+    void create_window_deferred();
+    void process_deferred_content();
     static void on_refresh_clicked_cb(GtkButton* button, gpointer user_data);
     static void on_appimage_clicked_cb(GtkButton* button, gpointer user_data);
     static void on_path_entry_changed_cb(GtkEditable* editable, gpointer user_data);

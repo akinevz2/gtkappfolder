@@ -14,6 +14,7 @@ sudo $PKG_MGR install -y \
     gcc-c++ \
     make \
     cmake \
+    ninja-build \
     pkgconfig \
     gtk3-devel \
     gtk4-devel \

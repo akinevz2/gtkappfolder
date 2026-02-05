@@ -8,9 +8,11 @@ namespace fs = std::filesystem;
 namespace UI {
 
 GTK4UI::GTK4UI() 
-    : window(nullptr), main_box(nullptr), path_entry(nullptr),
+    : app(nullptr), window(nullptr), main_box(nullptr), path_entry(nullptr),
       refresh_button(nullptr), scrolled_window(nullptr), flow_box(nullptr),
-      status_label(nullptr), path_completion(nullptr), completion_model(nullptr) {
+      status_label(nullptr), path_completion(nullptr), completion_model(nullptr),
+      window_width(0), window_height(0), window_created(false), 
+      path_completion_setup_deferred(false), has_deferred_empty_message(false) {
 }
 
 GTK4UI::~GTK4UI() {
@@ -20,6 +22,9 @@ GTK4UI::~GTK4UI() {
     if (path_completion) {
         g_object_unref(path_completion);
     }
+    if (app) {
+        g_object_unref(app);
+    }
 }
 
 void GTK4UI::initialize(int argc, char* argv[]) {
@@ -27,29 +32,44 @@ void GTK4UI::initialize(int argc, char* argv[]) {
 }
 
 void GTK4UI::create_window(const std::string& title, int width, int height) {
-    window = ADW_APPLICATION_WINDOW(adw_application_window_new(nullptr));
-    gtk_window_set_title(GTK_WINDOW(window), title.c_str());
-    gtk_window_set_default_size(GTK_WINDOW(window), width, height);
-    g_signal_connect(window, "close-request", G_CALLBACK(on_close_request_cb), this);
-    
-    main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
-    gtk_widget_set_margin_start(main_box, 10);
-    gtk_widget_set_margin_end(main_box, 10);
-    gtk_widget_set_margin_top(main_box, 10);
-    gtk_widget_set_margin_bottom(main_box, 10);
-    adw_application_window_set_content(window, main_box);
+    // Store parameters for deferred creation after app activation
+    window_title = title;
+    window_width = width;
+    window_height = height;
 }
 
 void GTK4UI::show_and_run() {
-    gtk_widget_set_visible(GTK_WIDGET(window), TRUE);
-    // Note: GTK4 typically uses GtkApplication main loop
+    // Create GtkApplication for managing the main loop
+    app = gtk_application_new("com.github.gtkappfolder", G_APPLICATION_DEFAULT_FLAGS);
+    g_signal_connect(app, "activate", G_CALLBACK(on_app_activate_cb), this);
+    
+    // Run the application's main loop
+    g_application_run(G_APPLICATION(app), 0, nullptr);
 }
 
 void GTK4UI::quit() {
     gtk_window_close(GTK_WINDOW(window));
 }
 
-void GTK4UI::create_path_bar(const std::string& initial_path) {
+void GTK4UI::create_window_deferred() {
+    if (window_created) return;
+    window_created = true;
+    
+    // Create the actual window now that the app has been activated
+    window = ADW_APPLICATION_WINDOW(adw_application_window_new(app));
+    gtk_window_set_title(GTK_WINDOW(window), window_title.c_str());
+    gtk_window_set_default_size(GTK_WINDOW(window), window_width, window_height);
+    g_signal_connect(window, "close-request", G_CALLBACK(on_close_request_cb), this);
+    
+    // Create main box
+    main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    gtk_widget_set_margin_start(main_box, 10);
+    gtk_widget_set_margin_end(main_box, 10);
+    gtk_widget_set_margin_top(main_box, 10);
+    gtk_widget_set_margin_bottom(main_box, 10);
+    adw_application_window_set_content(window, main_box);
+    
+    // Create path bar
     GtkWidget* hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_box_append(GTK_BOX(main_box), hbox);
     
@@ -70,9 +90,8 @@ void GTK4UI::create_path_bar(const std::string& initial_path) {
     refresh_button = gtk_button_new_with_label("Refresh");
     gtk_box_append(GTK_BOX(hbox), refresh_button);
     g_signal_connect(refresh_button, "clicked", G_CALLBACK(on_refresh_clicked_cb), this);
-}
-
-void GTK4UI::create_content_area() {
+    
+    // Create content area
     scrolled_window = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_window),
                                    GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
@@ -87,25 +106,95 @@ void GTK4UI::create_content_area() {
     gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(flow_box), 10);
     gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(flow_box), 10);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window), flow_box);
+    
+    // Create status bar
+    status_label = gtk_label_new(initial_status_text.empty() ? "Ready" : initial_status_text.c_str());
+    gtk_box_append(GTK_BOX(main_box), status_label);
+    
+    // Setup path completion now that path_entry exists
+    if (path_completion_setup_deferred && path_completion && path_entry) {
+        gtk_entry_set_completion(GTK_ENTRY(path_entry), path_completion);
+    }
+    
+    gtk_widget_set_visible(GTK_WIDGET(window), TRUE);
+}
+
+void GTK4UI::process_deferred_content() {
+    // Process any deferred tiles
+    if (has_deferred_empty_message) {
+        GtkWidget* label = gtk_label_new(deferred_empty_message.c_str());
+        gtk_widget_set_valign(label, GTK_ALIGN_START);
+        gtk_widget_set_halign(label, GTK_ALIGN_CENTER);
+        gtk_flow_box_append(GTK_FLOW_BOX(flow_box), label);
+        has_deferred_empty_message = false;
+    } else {
+        // Add all deferred tiles
+        for (const auto& tile : deferred_tiles) {
+            GtkWidget* button = gtk_button_new();
+            gtk_widget_set_size_request(button, 200, 200);
+            
+            GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+            gtk_button_set_child(GTK_BUTTON(button), vbox);
+            
+            GtkWidget* top_spacer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+            gtk_widget_set_vexpand(top_spacer, TRUE);
+            gtk_box_append(GTK_BOX(vbox), top_spacer);
+            
+            GtkWidget* icon = gtk_image_new_from_icon_name("application-x-executable");
+            gtk_image_set_pixel_size(GTK_IMAGE(icon), 96);
+            gtk_box_append(GTK_BOX(vbox), icon);
+            
+            GtkWidget* label = gtk_label_new(tile.filename.c_str());
+            gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+            gtk_label_set_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
+            gtk_label_set_max_width_chars(GTK_LABEL(label), 20);
+            gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
+            gtk_box_append(GTK_BOX(vbox), label);
+            
+            GtkWidget* bottom_spacer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+            gtk_widget_set_vexpand(bottom_spacer, TRUE);
+            gtk_box_append(GTK_BOX(vbox), bottom_spacer);
+            
+            g_object_set_data_full(G_OBJECT(button), "appimage_path", g_strdup(tile.path.c_str()), g_free);
+            g_signal_connect(button, "clicked", G_CALLBACK(on_appimage_clicked_cb), this);
+            
+            gtk_flow_box_append(GTK_FLOW_BOX(flow_box), button);
+        }
+        deferred_tiles.clear();
+    }
+}
+
+void GTK4UI::create_path_bar(const std::string& initial_path) {
+    // Store path for use when window is created
+    this->initial_path = initial_path;
+}
+
+void GTK4UI::create_content_area() {
+    // Content area will be created when window is created
 }
 
 void GTK4UI::create_status_bar(const std::string& initial_text) {
-    status_label = gtk_label_new(initial_text.c_str());
-    gtk_box_append(GTK_BOX(main_box), status_label);
+    // Status bar will be created when window is created
+    initial_status_text = initial_text;
 }
 
 void GTK4UI::setup_path_completion() {
-    completion_model = gtk_list_store_new(1, G_TYPE_STRING);
-    path_completion = gtk_entry_completion_new();
-    gtk_entry_completion_set_model(path_completion, GTK_TREE_MODEL(completion_model));
-    gtk_entry_completion_set_text_column(path_completion, 0);
-    gtk_entry_completion_set_inline_completion(path_completion, FALSE);
-    gtk_entry_completion_set_inline_selection(path_completion, FALSE);
-    gtk_entry_completion_set_popup_completion(path_completion, TRUE);
-    gtk_entry_completion_set_minimum_key_length(path_completion, 1);
-    gtk_entry_completion_set_match_func(path_completion, on_completion_match_cb, this, nullptr);
-    g_signal_connect(path_completion, "match-selected", G_CALLBACK(on_completion_match_selected_cb), this);
-    gtk_entry_set_completion(GTK_ENTRY(path_entry), path_completion);
+    // Mark that path completion setup should be done when window is created
+    path_completion_setup_deferred = true;
+    
+    // Create the completion model now even though we don't have path_entry yet
+    if (!completion_model) {
+        completion_model = gtk_list_store_new(1, G_TYPE_STRING);
+        path_completion = gtk_entry_completion_new();
+        gtk_entry_completion_set_model(path_completion, GTK_TREE_MODEL(completion_model));
+        gtk_entry_completion_set_text_column(path_completion, 0);
+        gtk_entry_completion_set_inline_completion(path_completion, FALSE);
+        gtk_entry_completion_set_inline_selection(path_completion, FALSE);
+        gtk_entry_completion_set_popup_completion(path_completion, TRUE);
+        gtk_entry_completion_set_minimum_key_length(path_completion, 1);
+        gtk_entry_completion_set_match_func(path_completion, on_completion_match_cb, this, nullptr);
+        g_signal_connect(path_completion, "match-selected", G_CALLBACK(on_completion_match_selected_cb), this);
+    }
 }
 
 void GTK4UI::update_path_completion(const std::string& current_text) {
@@ -167,6 +256,9 @@ void GTK4UI::set_path_entry_text(const std::string& text) {
 }
 
 void GTK4UI::clear_content() {
+    // Skip if window not yet created
+    if (!flow_box) return;
+    
     GtkWidget* child = gtk_widget_get_first_child(flow_box);
     while (child) {
         GtkWidget* next = gtk_widget_get_next_sibling(child);
@@ -177,6 +269,12 @@ void GTK4UI::clear_content() {
 
 void GTK4UI::add_appimage_tile(const std::string& path, const std::string& filename,
                                 const std::string& icon_path) {
+    // If window not yet created, defer the tile addition
+    if (!flow_box) {
+        deferred_tiles.push_back({path, filename, icon_path});
+        return;
+    }
+    
     GtkWidget* button = gtk_button_new();
     gtk_widget_set_size_request(button, 200, 200);
     
@@ -209,6 +307,13 @@ void GTK4UI::add_appimage_tile(const std::string& path, const std::string& filen
 }
 
 void GTK4UI::show_empty_message(const std::string& message) {
+    // If window not yet created, defer the message
+    if (!flow_box) {
+        has_deferred_empty_message = true;
+        deferred_empty_message = message;
+        return;
+    }
+    
     GtkWidget* label = gtk_label_new(message.c_str());
     gtk_widget_set_valign(label, GTK_ALIGN_START);
     gtk_widget_set_halign(label, GTK_ALIGN_CENTER);
@@ -341,6 +446,12 @@ gboolean GTK4UI::on_completion_match_selected_cb(GtkEntryCompletion* completion,
     }
 
     return TRUE;
+}
+
+void GTK4UI::on_app_activate_cb(GtkApplication* app, gpointer user_data) {
+    GTK4UI* ui = static_cast<GTK4UI*>(user_data);
+    ui->create_window_deferred();
+    ui->process_deferred_content();
 }
 
 } // namespace UI

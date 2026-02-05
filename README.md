@@ -25,21 +25,21 @@ A modern GTK4/libadwaita application to browse, organize, and launch AppImage fi
 
 ```bash
 # Install dependencies (Debian/Ubuntu)
-sudo apt-get install -y build-essential cmake libgtk-4-dev libadwaita-1-dev
+sudo apt-get install -y build-essential cmake ninja-build libgtk-4-dev libadwaita-1-dev
 
 # Or use the provided install script
 ./install-deps.deb.sh
 
-# Create build directory and build
+# Create build directory and build with Ninja
 mkdir -p build && cd build
-cmake ..
-make
+cmake -G Ninja ..
+ninja
 
 # Run the application
 ./bin/GtkAppFolder
 ```
 
-For other distributions, use the appropriate install script:
+For other distributions, use the appropriate install script (installs Ninja too):
 - Fedora/RHEL: `./install-deps.yum.sh`
 - General: `./install-deps.sh`
 
