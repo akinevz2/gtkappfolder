@@ -1,63 +1,73 @@
-.PHONY: all build build-gtk3 run run-gtk3 clean install-deps check-prereqs help
+.PHONY: all clean rebuild debug
 
-# Default target
-all: build
+CXX ?= g++
 
-# Check for required tools
-check-prereqs:
-	@echo "Checking prerequisites..."
-	@command -v g++ >/dev/null 2>&1 || { echo "Error: g++ not found. Run 'make install-deps' to install."; exit 1; }
-	@command -v cmake >/dev/null 2>&1 || { echo "Error: cmake not found. Run 'make install-deps' to install."; exit 1; }
-	@command -v ninja >/dev/null 2>&1 || { echo "Error: ninja not found. Run 'make install-deps' to install."; exit 1; }
-	@pkg-config --exists gtk4 || { echo "Error: GTK4 not found. Run 'make install-deps' to install."; exit 1; }
-	@pkg-config --exists libadwaita-1 || { echo "Error: libadwaita not found. Run 'make install-deps' to install."; exit 1; }
-	@echo "All prerequisites satisfied!"
+SRC_DIR := src
+INCLUDE_DIR := include
+LIB_DIR := lib
+BUILD_DIR := build
+OBJ_DIR := $(BUILD_DIR)/obj
+BIN_DIR := $(BUILD_DIR)/bin
+TARGET := $(BIN_DIR)/GtkAppFolder
 
-# Create build directory and compile the project
-build: check-prereqs
-	@mkdir -p build
-	@cd build && cmake -G Ninja .. && ninja
-	@echo "Build complete! Binary is at: build/bin/GtkAppFolder"
+# Enable parallel builds by default; override with `make JOBS=4`.
+JOBS ?= $(shell nproc)
+ifeq ($(MAKELEVEL),0)
+ifneq ($(filter -j% --jobs%,$(MAKEFLAGS)),)
+else
+MAKEFLAGS += -j$(JOBS)
+endif
+endif
 
-# Create build directory and compile the project with GTK3
-build-gtk3: check-prereqs
-	@mkdir -p build
-	@cd build && cmake -G Ninja .. -DUSE_GTK4=OFF && ninja
-	@echo "GTK3 build complete! Binary is at: build/bin/GtkAppFolder"
+# Automatically discover all C++ source files under src/.
+SRC_FILES := $(shell find $(SRC_DIR) -type f -name '*.cpp')
+OBJ_FILES := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRC_FILES))
+DEP_FILES := $(OBJ_FILES:.o=.d)
 
-# Run the application
-run: build
-	@./build/bin/GtkAppFolder
+CPPFLAGS := -I$(INCLUDE_DIR) -I$(SRC_DIR)
+CXXFLAGS_COMMON := -std=c++17 -Wall -Wextra
+CXXFLAGS_RELEASE := -O2
+CXXFLAGS_DEBUG := -O0 -g
 
-# Build and run the GTK3 version
-run-gtk3: build-gtk3
-	@./build/bin/GtkAppFolder
+BUILD ?= release
+ifeq ($(BUILD),debug)
+	CXXFLAGS := $(CXXFLAGS_COMMON) $(CXXFLAGS_DEBUG)
+else
+	CXXFLAGS := $(CXXFLAGS_COMMON) $(CXXFLAGS_RELEASE)
+endif
 
-# Clean build artifacts
+# Link all libraries matching lib/lib*.a and lib/lib*.so.
+LIB_SEARCH_PATHS := -L$(LIB_DIR)
+LIB_NAMES := $(notdir $(basename $(wildcard $(LIB_DIR)/lib*.a $(LIB_DIR)/lib*.so)))
+LDLIBS := $(patsubst lib%,-l%,$(LIB_NAMES))
+LDFLAGS += $(LIB_SEARCH_PATHS)
+
+ifeq ($(strip $(SRC_FILES)),)
+all:
+	@echo "Error: no C++ source files found under $(SRC_DIR)/"
+	@echo "Add .cpp files to $(SRC_DIR)/ or update source discovery in Makefile."
+	@exit 1
+else
+all: $(TARGET)
+
+$(TARGET): $(OBJ_FILES) | $(BIN_DIR)
+	$(CXX) $(OBJ_FILES) $(LDFLAGS) $(LDLIBS) -o $@
+
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -c $< -o $@
+
+$(BIN_DIR):
+	@mkdir -p $@
+
 clean:
-	@rm -rf build
-	@echo "Build directory cleaned"
+	rm -rf $(BUILD_DIR)
 
-# Install required dependencies (auto-detects package manager)
-install-deps:
-	@./install-deps.sh
+rebuild: clean all
 
-# Help target
-help:
-	@echo "GTK AppImage Browser - Makefile Commands"
-	@echo "=========================================="
-	@echo ""
-	@echo "Available targets:"
-	@echo "  make               - Default: build the project"
-	@echo "  make build         - Build the project (checks prerequisites first)"
-	@echo "  make build-gtk3    - Build the project with GTK3"
-	@echo "  make run           - Build and run the application"
-	@echo "  make run-gtk3      - Build and run the GTK3 version"
-	@echo "  make clean         - Remove build artifacts"
-	@echo "  make check-prereqs - Check if required tools are installed"
-	@echo "  make install-deps  - Install required dependencies (auto-detects package manager)"
-	@echo "  make help          - Show this help message"
-	@echo ""
-	@echo "Quick start:"
-	@echo "  1. make install-deps  (first time only)"
-	@echo "  2. make run           (build and launch)"
+debug:
+	$(MAKE) BUILD=debug rebuild
+
+endif
+
+-include $(DEP_FILES)
